@@ -38,7 +38,8 @@ actually behaves, not just what produces a plausible-looking program.
 
 ## Quick preview (no setup, no build)
 
-Open [`standalone/pendant-standalone.html`](https://perfecthost-ship-it.github.io/pendant/standalone/pendant-standalone.html` directly in any browser — double-click it.
+**[▶ Try the live app](https://perfecthost-ship-it.github.io/pendant/standalone/pendant-standalone.html)**, or see
+[Quick preview](#quick-preview-no-setup-no-build directly in any browser — double-click it.
 Everything (including the G-code engine) is inlined into that one file, so there's
 nothing else it depends on.
 
