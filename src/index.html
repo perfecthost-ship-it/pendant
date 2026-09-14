@@ -308,7 +308,7 @@
   .screen {
     margin: 16px; border: 3px solid #06090F; border-radius: 4px; background: #060C16;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 2px 10px rgba(0,0,0,0.4);
-    display: flex; flex-direction: column; min-height: 260px;
+    display: flex; flex-direction: column; min-height: 290px;
   }
   .screen-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -319,10 +319,13 @@
   }
   .screen-alarm-led.on { background: var(--red); box-shadow: 0 0 8px var(--red); }
   .screen-body { flex: 1; display: grid; grid-template-columns: 180px 1fr; min-height: 0; }
-  .position-panel { border-right: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .position-panel {
+    border-right: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column;
+    gap: 6px; overflow-y: auto; min-height: 0;
+  }
   .pos-row { display: flex; justify-content: space-between; font-size: 20px; color: var(--accent); }
   .pos-axis { color: var(--steel); font-size: 14px; align-self: center; }
-  .pos-meta { margin-top: 10px; font-size: 10px; color: var(--steel-dim); display: flex; flex-direction: column; gap: 3px; }
+  .pos-meta { margin-top: 6px; font-size: 9.5px; color: var(--steel-dim); display: flex; flex-direction: column; gap: 2px; }
   .pos-meta span { color: var(--steel); }
   .program-listing {
     padding: 10px 12px; font-size: 11.5px; line-height: 1.6; overflow-y: auto; color: var(--steel);
@@ -484,7 +487,6 @@
                     <div>SPINDLE <span id="posSpindleLabel">STOP</span></div>
                     <div>TOOL <span id="posToolLabel">NONE</span></div>
                     <div>REF <span id="posRefLabel">X✗ Y✗ Z✗</span></div>
-                    <div>↑↓ SELECT LINE</div>
                   </div>
                 </div>
                 <div class="program-listing mono" id="programListing"></div>
