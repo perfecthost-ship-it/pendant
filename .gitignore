@@ -1,0 +1,14 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Rust / Tauri build output
+src-tauri/target/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

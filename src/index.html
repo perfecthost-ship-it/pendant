@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>PENDANT — Fanuc G-Code Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bezel: #05070D;
+    --panel: #0C1220;
+    --field: #141D33;
+    --border: #223052;
+    --accent: #3D8BFF;
+    --accent-dim: #1D4A96;
+    --accent-soft: rgba(61, 139, 255, 0.08);
+    --green: #2FD480;
+    --red: #FF5B54;
+    --steel: #7C8CAF;
+    --steel-dim: #45527A;
+    --text: #E8EDFB;
+    --grid-line: rgba(61, 139, 255, 0.09);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bezel); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  #app {
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    height: 100vh;
+  }
+
+  /* ---- Split-screen layout ---- */
+  .split-container {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+  }
+  .split-pane {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .split-pane-header {
+    background: var(--bezel); border-bottom: 1px solid var(--border);
+    padding: 6px 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--steel-dim); flex-shrink: 0;
+  }
+  .split-divider {
+    height: 6px; background: var(--border); cursor: ns-resize; flex-shrink: 0;
+    position: relative;
+  }
+  .split-divider::after {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 32px; height: 2px; background: var(--steel-dim); border-radius: 1px;
+  }
+  .split-divider:hover { background: var(--accent-dim); }
+
+  /* ---- Status strip ---- */
+  .status-strip {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 28px;
+    padding: 10px 20px;
+  }
+  .status-strip .brand {
+    font-weight: 700; letter-spacing: 0.02em; font-size: 14px; color: var(--accent);
+  }
+  .status-item { display: flex; flex-direction: column; gap: 2px; }
+  .status-item .k { font-size: 10px; color: var(--steel-dim); }
+  .status-item .v { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); }
+  .status-strip .spacer { flex: 1; }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* ---- Main layout ---- */
+  .main { display: grid; grid-template-columns: 200px 1fr 1fr; min-height: 0; }
+
+  /* ---- Operation softkeys ---- */
+  .softkeys {
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 12px 0;
+  }
+  .softkey {
+    text-align: left; background: none; border: none; color: var(--steel);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 500;
+    padding: 14px 18px; cursor: pointer; border-left: 3px solid transparent;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .softkey:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+  .softkey.active {
+    color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft);
+  }
+  .softkey .num { font-family: 'JetBrains Mono', monospace; color: var(--steel-dim); font-size: 11px; }
+  .softkey.active .num { color: var(--accent-dim); }
+
+  /* ---- Parameter form ---- */
+  .form-pane {
+    overflow-y: auto; padding: 20px 24px; border-right: 1px solid var(--border);
+  }
+  .form-section-title {
+    font-size: 11px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.08em;
+    margin: 18px 0 10px; font-weight: 600;
+  }
+  .form-section-title:first-child { margin-top: 0; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--steel); }
+  .field .unit-wrap { position: relative; }
+  .field input {
+    width: 100%; background: var(--field); border: 1px solid var(--border);
+    color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    padding: 8px 34px 8px 10px; border-radius: 2px; outline: none;
+  }
+  .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+  .field.invalid input { border-color: var(--red); }
+  .field.invalid input:focus { box-shadow: 0 0 0 1px var(--red); }
+  .field-error {
+    font-size: 10.5px; color: var(--red); min-height: 13px; margin-top: -1px;
+  }
+  .field .unit {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-size: 11px; color: var(--steel-dim); pointer-events: none;
+  }
+  .field-wide { grid-column: 1 / -1; }
+  .points-input {
+    width: 100%; background: var(--field); border: 1px solid var(--border);
+    color: var(--text); font-size: 12.5px; padding: 8px 10px; border-radius: 2px;
+    outline: none; resize: vertical;
+  }
+  .points-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+  .checkbox-row input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .checkbox-row label { font-size: 12px; color: var(--steel); }
+  .select-input {
+    width: 100%; background: var(--field); border: 1px solid var(--border);
+    color: var(--text); font-size: 12.5px; padding: 8px 10px; border-radius: 2px;
+    outline: none; appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--steel) 50%),
+      linear-gradient(135deg, var(--steel) 50%, transparent 50%);
+    background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+  .select-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+
+  /* ---- G-code readout ---- */
+  .readout-pane {
+    display: flex; flex-direction: column; min-height: 0; background: var(--bezel);
+  }
+  .readout-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .readout-header .title { font-size: 11px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  .readout-header .status { font-size: 11px; display: flex; align-items: center; gap: 6px; }
+  .view-tabs { display: flex; gap: 2px; }
+  .view-tab {
+    background: none; border: none; color: var(--steel-dim); font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 6px 12px; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .view-tab:hover { color: var(--text); }
+  .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .readout-body {
+    flex: 1; overflow: auto; padding: 16px 18px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px; line-height: 1.7; white-space: pre; color: var(--text);
+  }
+  .readout-body .ln-num { color: var(--steel-dim); display: inline-block; width: 34px; user-select: none; }
+  .readout-body .comment { color: var(--steel); }
+
+  /* ---- Toolpath viewer ---- */
+  .toolpath-body {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    background:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  #toolpathCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
+  .toolpath-legend {
+    display: flex; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--steel); }
+  .swatch { width: 16px; height: 2px; display: inline-block; }
+  .swatch-cut { background: var(--accent); height: 2px; }
+  .swatch-ramp { background: var(--green); height: 2px; }
+  .swatch-rapid { background: var(--steel-dim); height: 0; border-top: 1px dashed var(--steel-dim); }
+  .swatch-drill { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+
+  /* ---- Action bar ---- */
+  .action-bar {
+    background: var(--panel); border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; padding: 12px 20px;
+  }
+  .btn {
+    font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; font-size: 13px;
+    padding: 11px 22px; border-radius: 2px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--field); color: var(--text);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 1px 0 rgba(0,0,0,0.4);
+  }
+  .btn:active { transform: translateY(1px); box-shadow: none; }
+  .btn.primary { background: var(--accent); color: #071021; border-color: var(--accent); }
+  .btn.primary:hover { background: #6BAEFF; }
+  .btn:hover { border-color: var(--steel); }
+  .action-bar .spacer { flex: 1; }
+  .action-bar .hint { font-size: 11px; color: var(--steel-dim); }
+
+  /* ---- View wrapper (generator/simulator share this) ---- */
+  .view-wrap { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: auto; }
+
+  /* ---- Simulator ---- */
+  #paneSimulator {
+    /* Scoped theme override: every simulator rule below already reads the shared --panel,
+       --field, --accent etc. tokens, so redefining them here (custom properties cascade to
+       descendants) recolors the whole practice pane - header included - without touching
+       each rule individually. Lighter blue + gold, distinct from the Generator's dark navy. */
+    --bezel: #D6E6F7;
+    --panel: #E9F2FB;
+    --field: #FFFFFF;
+    --border: #A9C3DE;
+    --accent: #D9A400;
+    --accent-dim: #A67C00;
+    --accent-soft: rgba(217, 164, 0, 0.16);
+    --steel: #46617F;
+    --steel-dim: #7B93AD;
+    --text: #142438;
+    background: var(--bezel);
+  }
+  .simulator {
+    display: grid; grid-template-columns: 150px 1fr 1fr; flex: 1; min-height: 0; overflow: auto;
+    background: var(--bezel);
+  }
+  .part-preview {
+    display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border);
+  }
+  .part-preview-header {
+    padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+    font-size: 11px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .part-preview-body {
+    flex: 1; min-height: 0; position: relative;
+    background:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 24px 24px; background-position: -1px -1px; opacity: 1;
+  }
+  #partPreviewCanvas { width: 100%; height: 100%; display: block; }
+  .part-preview-legend {
+    display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 18px; border-top: 1px solid var(--border);
+    background: var(--panel); font-size: 10.5px;
+  }
+  /* Hardcoded (not theme-scoped) so these always match the canvas colors exactly, regardless
+     of which pane's theme they're rendered in - drawToolpath and drawPartPreview both use
+     these same literal hex values, so the legend can't drift out of sync with the drawing. */
+  .pp-swatch-cut { background: #3D8BFF; height: 2px; }
+  .pp-swatch-ramp { background: #2FD480; height: 2px; }
+  .pp-swatch-rapid { height: 0; border-top: 1px dashed #45527A; }
+  .pp-swatch-drill { width: 8px; height: 8px; border-radius: 50%; background: #FF5B54; }
+  .pp-swatch-tool { width: 10px; height: 10px; border-radius: 50%; background: #D9A400; border: 2px solid #142438; }
+  .sim-bezel {
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center; gap: 22px;
+    padding: 24px 12px; overflow-y: auto;
+  }
+  .sim-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .sim-label { font-size: 10px; color: var(--steel-dim); text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .switch-btn {
+    width: 46px; height: 46px; border-radius: 50%; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 15px;
+    border: 2px solid var(--border); background: var(--field); color: var(--steel);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.03);
+  }
+  .switch-btn.switch-on.engaged { background: var(--green); color: #06180F; border-color: var(--green); box-shadow: 0 0 10px rgba(47,212,128,0.6); }
+  .switch-btn.switch-off:active, .switch-btn.switch-on:active { transform: translateY(1px); }
+
+  .estop-btn {
+    width: 58px; height: 58px; border-radius: 50%; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #FF7A72, #C8362D 70%);
+    border: 3px solid #7A1B16; box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+  }
+  .estop-btn.engaged { box-shadow: 0 0 16px rgba(255,91,84,0.9), 0 2px 6px rgba(0,0,0,0.6); transform: scale(0.94); }
+
+  .dial {
+    width: 64px; height: 64px; border-radius: 50%; position: relative; cursor: grab;
+    background: var(--field); border: 1px solid var(--border);
+    background-image:
+      repeating-conic-gradient(var(--steel-dim) 0deg 2deg, transparent 2deg 27deg);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+  }
+  .dial:active { cursor: grabbing; }
+  .dial-needle {
+    position: absolute; left: 50%; top: 50%; width: 2px; height: 26px;
+    background: var(--accent); transform-origin: top center; margin-left: -1px;
+    box-shadow: 0 0 4px var(--accent);
+  }
+  .dial-value { font-size: 12px; color: var(--text); }
+  .mpg-buttons { display: flex; gap: 6px; }
+  .mpg-btn {
+    width: 26px; height: 22px; border-radius: 2px; cursor: pointer;
+    background: var(--field); border: 1px solid var(--border); color: var(--text); font-weight: 700;
+  }
+  .mpg-btn:hover { border-color: var(--accent); }
+
+  .sim-console { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+
+  .screen {
+    margin: 16px; border: 3px solid #06090F; border-radius: 4px; background: #060C16;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 2px 10px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column; min-height: 260px;
+  }
+  .screen-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--accent);
+  }
+  .screen-alarm-led {
+    width: 10px; height: 10px; border-radius: 50%; background: #2A1010; box-shadow: inset 0 0 3px rgba(0,0,0,0.8);
+  }
+  .screen-alarm-led.on { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .screen-body { flex: 1; display: grid; grid-template-columns: 180px 1fr; min-height: 0; }
+  .position-panel { border-right: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .pos-row { display: flex; justify-content: space-between; font-size: 20px; color: var(--accent); }
+  .pos-axis { color: var(--steel); font-size: 14px; align-self: center; }
+  .pos-meta { margin-top: 10px; font-size: 10px; color: var(--steel-dim); display: flex; flex-direction: column; gap: 3px; }
+  .pos-meta span { color: var(--steel); }
+  .program-listing {
+    padding: 10px 12px; font-size: 11.5px; line-height: 1.6; overflow-y: auto; color: var(--steel);
+    white-space: pre;
+  }
+  .program-listing .current-line { color: var(--accent); background: var(--accent-soft); }
+  .screen-mdi-line {
+    border-top: 1px solid var(--border); padding: 6px 12px; font-size: 12.5px; color: var(--green);
+  }
+  #mdiCursor { animation: blink 1s step-start infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .softkey-row { display: flex; gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); }
+  .softkey-btn {
+    flex: 1; background: var(--field); border: none; color: var(--steel); font-size: 11px; font-weight: 600;
+    padding: 9px 4px; cursor: pointer; letter-spacing: 0.03em;
+  }
+  .softkey-btn:hover:not(:disabled) { color: var(--accent); }
+  .softkey-btn:disabled { color: var(--steel-dim); cursor: default; }
+
+  .keyboard-grid { display: flex; flex-direction: column; gap: 3px; padding: 10px 16px; }
+  .kb-row { display: flex; gap: 3px; }
+  .kb-key {
+    flex: 1; background: var(--field); border: 1px solid var(--border); color: var(--text);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 7px 0; cursor: pointer; border-radius: 2px;
+  }
+  .kb-key:hover { border-color: var(--accent); }
+  .kb-key.wide { flex: 2.4; }
+  .kb-key.accent-key { color: var(--accent); border-color: var(--accent-dim); }
+  .kb-key.pressed { background: var(--accent); color: #071021; border-color: var(--accent); }
+
+  .mcp-grid { display: flex; flex-wrap: wrap; gap: 14px; padding: 12px 16px 20px; border-top: 1px solid var(--border); background: var(--panel); }
+  .mcp-group { display: flex; flex-direction: column; gap: 4px; }
+  .mcp-group-label { font-size: 9px; color: var(--steel-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+  .mcp-row { display: flex; gap: 4px; }
+  .mcp-btn {
+    background: var(--field); border: 1px solid var(--border); color: var(--steel); cursor: pointer;
+    font-size: 10.5px; font-weight: 600; padding: 7px 9px; border-radius: 2px; min-width: 40px;
+  }
+  .mcp-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+  .mcp-btn:disabled { opacity: 0.35; cursor: default; }
+  .mcp-btn.active { background: var(--accent); color: #071021; border-color: var(--accent); }
+  .mcp-btn.cycle-start { background: var(--green); color: #06180F; border-color: var(--green); }
+  .mcp-btn.cycle-start:disabled { background: var(--field); color: var(--steel); }
+  .mcp-btn.feed-hold { background: var(--red); color: #2A0805; border-color: var(--red); }
+  .mcp-btn.feed-hold:disabled { background: var(--field); color: var(--steel); }
+  .mcp-btn.toggle.active { background: var(--accent-dim); color: var(--text); border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="status-strip">
+    <div class="brand">PENDANT</div>
+    <div class="status-item"><span class="k">PROGRAM</span><span class="v mono" id="statProgram">O1001</span></div>
+    <div class="status-item"><span class="k">OPERATION</span><span class="v mono" id="statOp">POCKET</span></div>
+    <div class="status-item"><span class="k">DIALECT</span><span class="v mono">FANUC 0i-MF</span></div>
+    <div class="spacer"></div>
+    <div class="status-item"><span class="k">STATUS</span><span class="v" style="display:flex;align-items:center;gap:6px;"><span class="led" id="statusLed"></span><span id="statusText">READY</span></span></div>
+  </div>
+
+  <div class="split-container" id="splitContainer">
+    <div class="split-pane" id="paneGenerator">
+      <div class="split-pane-header">Generator</div>
+      <div id="generatorView" class="view-wrap">
+        <div class="main">
+          <div class="softkeys" id="softkeys"></div>
+          <div class="form-pane">
+            <div class="form-section-title">Program Setup</div>
+            <div class="field-grid" id="commonFields"></div>
+            <div class="form-section-title" id="opSectionTitle">Operation Parameters</div>
+            <div class="field-grid" id="opFields"></div>
+          </div>
+          <div class="readout-pane">
+            <div class="readout-header">
+              <div class="view-tabs">
+                <button class="view-tab active" id="tabGcode">G-Code</button>
+                <button class="view-tab" id="tabToolpath">Toolpath</button>
+              </div>
+              <div class="status"><span class="led" style="background:var(--accent);box-shadow:0 0 6px var(--accent);"></span><span id="lineCount" class="mono">0 lines</span></div>
+            </div>
+            <div class="readout-body" id="gcodeOutput"></div>
+            <div class="toolpath-body" id="toolpathBody" style="display:none;">
+              <canvas id="toolpathCanvas"></canvas>
+              <div class="toolpath-legend">
+                <span class="legend-item"><span class="swatch swatch-cut"></span>Cut</span>
+                <span class="legend-item"><span class="swatch swatch-ramp"></span>Ramp / Helix</span>
+                <span class="legend-item"><span class="swatch swatch-rapid"></span>Rapid</span>
+                <span class="legend-item"><span class="swatch swatch-drill"></span>Drill Point</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="action-bar">
+          <button class="btn primary" id="btnExport">Export .NC</button>
+          <button class="btn" id="btnCopy">Copy to Clipboard</button>
+          <button class="btn" id="btnReset">Reset Defaults</button>
+          <div class="spacer"></div>
+          <div class="hint">Verify against machine limits before running. This output is not a substitute for operator sign-off.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split-divider" id="splitDivider"></div>
+
+    <div class="split-pane" id="paneSimulator">
+      <div class="split-pane-header">Simulator — Practice Mode</div>
+      <div id="simulatorView" class="view-wrap">
+        <div class="simulator">
+          <div class="sim-bezel">
+            <div class="sim-group">
+              <button class="switch-btn switch-on" id="pwrOn" title="Power ON">I</button>
+              <div class="sim-label">Power On</div>
+            </div>
+            <div class="sim-group">
+              <button class="switch-btn switch-off" id="pwrOff" title="Power OFF">O</button>
+              <div class="sim-label">Power Off</div>
+            </div>
+            <div class="sim-group">
+              <button class="estop-btn" id="estopBtn" title="Emergency Stop"></button>
+              <div class="sim-label">Emergency Stop</div>
+            </div>
+            <div class="sim-group">
+              <div class="dial" id="overrideDial">
+                <div class="dial-needle" id="overrideNeedle"></div>
+              </div>
+              <div class="dial-value mono" id="overrideValue">100%</div>
+              <div class="sim-label">Feed / Jog Override</div>
+            </div>
+            <div class="sim-group">
+              <div class="dial mpg-dial" id="mpgDial">
+                <div class="dial-needle" id="mpgNeedle"></div>
+              </div>
+              <div class="mpg-buttons">
+                <button class="mpg-btn" id="mpgMinus">−</button>
+                <button class="mpg-btn" id="mpgPlus">+</button>
+              </div>
+              <div class="sim-label">Manual Pulse Generator</div>
+            </div>
+          </div>
+
+          <div class="sim-console">
+            <div class="screen">
+              <div class="screen-header">
+                <span class="mono" id="scrMode">POWER OFF</span>
+                <span class="mono" id="scrProgram">O0000</span>
+                <span class="screen-alarm-led" id="scrAlarmLed"></span>
+              </div>
+              <div class="screen-body">
+                <div class="position-panel">
+                  <div class="pos-row"><span class="pos-axis">X</span><span class="pos-val mono" id="posX">0.000</span></div>
+                  <div class="pos-row"><span class="pos-axis">Y</span><span class="pos-val mono" id="posY">0.000</span></div>
+                  <div class="pos-row"><span class="pos-axis">Z</span><span class="pos-val mono" id="posZ">0.000</span></div>
+                  <div class="pos-meta mono">
+                    <div>MODE <span id="posModeLabel">-</span></div>
+                    <div>HANDLE AXIS <span id="posAxisLabel">X</span></div>
+                    <div>INC <span id="posIncLabel">x1</span></div>
+                    <div>OVR <span id="posOvrLabel">100%</span></div>
+                    <div>SPINDLE <span id="posSpindleLabel">STOP</span></div>
+                    <div>TOOL <span id="posToolLabel">NONE</span></div>
+                    <div>REF <span id="posRefLabel">X✗ Y✗ Z✗</span></div>
+                    <div>↑↓ SELECT LINE</div>
+                  </div>
+                </div>
+                <div class="program-listing mono" id="programListing"></div>
+              </div>
+              <div class="screen-mdi-line mono" id="mdiLine">&gt;<span id="mdiCursor">_</span></div>
+            </div>
+
+            <div class="softkey-row" id="simSoftkeys">
+              <button class="softkey-btn" data-action="loadGenerated">LOAD PROG</button>
+              <button class="softkey-btn" data-action="clearProgram">CLEAR PRG</button>
+              <button class="softkey-btn" data-action="resetAlarm">RESET</button>
+              <button class="softkey-btn" data-action="deleteLine">DEL LINE</button>
+            </div>
+
+            <div class="keyboard-grid" id="mdiKeyboard"></div>
+
+            <div class="mcp-grid" id="mcp"></div>
+          </div>
+
+          <div class="part-preview">
+            <div class="part-preview-header">Part Preview</div>
+            <div class="part-preview-body">
+              <canvas id="partPreviewCanvas"></canvas>
+            </div>
+            <div class="part-preview-legend">
+              <span class="legend-item"><span class="swatch pp-swatch-cut"></span>Cut</span>
+              <span class="legend-item"><span class="swatch pp-swatch-ramp"></span>Ramp / Helix</span>
+              <span class="legend-item"><span class="swatch pp-swatch-rapid"></span>Rapid</span>
+              <span class="legend-item"><span class="swatch pp-swatch-drill"></span>Drill Point</span>
+              <span class="legend-item"><span class="swatch pp-swatch-tool"></span>Tool Position</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+  let currentOp = "pocket";
+  const values = {}; // key -> value, shared across common + per-op (per-op keys namespaced by op)
+
+  function initValues() {
+    values.common = {};
+    COMMON_FIELDS.forEach(f => values.common[f.key] = f.default);
+    values.op = {};
+    Object.keys(OPERATIONS).forEach(opKey => {
+      values.op[opKey] = {};
+      OPERATIONS[opKey].fields.forEach(f => values.op[opKey][f.key] = f.default);
+    });
+  }
+  initValues();
+
+  function renderSoftkeys() {
+    const el = document.getElementById("softkeys");
+    el.innerHTML = "";
+    Object.keys(OPERATIONS).forEach((key, i) => {
+      const btn = document.createElement("button");
+      btn.className = "softkey" + (key === currentOp ? " active" : "");
+      btn.innerHTML = `<span>${OPERATIONS[key].label}</span><span class="num">F${i + 1}</span>`;
+      btn.onclick = () => { currentOp = key; renderAll(); };
+      el.appendChild(btn);
+    });
+  }
+
+  function fieldInput(field, val, onInput) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    if (field.type === "points" || field.type === "checkbox") {
+      wrap.classList.add("field-wide");
+    }
+    const label = document.createElement("label");
+    label.textContent = field.label;
+
+    if (field.type === "points") {
+      const textarea = document.createElement("textarea");
+      textarea.className = "mono points-input";
+      textarea.value = val;
+      textarea.rows = 6;
+      textarea.oninput = () => onInput(textarea.value);
+      wrap.appendChild(label);
+      wrap.appendChild(textarea);
+      return wrap;
+    }
+
+    if (field.type === "checkbox") {
+      const row = document.createElement("div");
+      row.className = "checkbox-row";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!val;
+      input.oninput = () => onInput(input.checked);
+      row.appendChild(input);
+      row.appendChild(label);
+      wrap.appendChild(row);
+      return wrap;
+    }
+
+    if (field.type === "select") {
+      const select = document.createElement("select");
+      select.className = "mono select-input";
+      field.options.forEach(opt => {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (opt.value === val) o.selected = true;
+        select.appendChild(o);
+      });
+      select.onchange = () => onInput(select.value);
+      wrap.appendChild(label);
+      wrap.appendChild(select);
+      return wrap;
+    }
+
+    const uw = document.createElement("div");
+    uw.className = "unit-wrap";
+    const input = document.createElement("input");
+    input.type = field.isText ? "text" : "number";
+    input.value = val;
+    input.step = "any";
+    if (!field.isText && field.min !== undefined) input.min = field.min;
+    if (!field.isText && field.max !== undefined) input.max = field.max;
+    const errorEl = document.createElement("div");
+    errorEl.className = "field-error";
+    input.oninput = () => {
+      const parsed = field.isText ? input.value : parseFloat(input.value);
+      const msg = field.isText ? null : validateFieldValue(field, parsed);
+      wrap.classList.toggle("invalid", !!msg);
+      errorEl.textContent = msg || "";
+      onInput(parsed);
+    };
+    // validate the initial value too, so a field restored with a bad value (or a field
+    // that starts blank) shows its error immediately rather than only after the next edit
+    if (!field.isText) {
+      const initialMsg = validateFieldValue(field, val);
+      if (initialMsg) { wrap.classList.add("invalid"); errorEl.textContent = initialMsg; }
+    }
+    uw.appendChild(input);
+    const displayUnit = field.linear ? linearUnitLabel(field.unit) : field.unit;
+    if (displayUnit) {
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = displayUnit;
+      uw.appendChild(unit);
+    }
+    wrap.appendChild(label);
+    wrap.appendChild(uw);
+    wrap.appendChild(errorEl);
+    return wrap;
+  }
+
+  // Returns an error message if the value is out of the field's declared range (or blank/
+  // NaN), or null if it's fine. This is what stands between a mistyped 0 and either a
+  // crashed app or a silently enormous, nonsensical program - see the fixes to engine.js's
+  // safePassCount/stepover flooring for what happens if a bad value gets all the way through.
+  function validateFieldValue(field, value) {
+    if (value === undefined || value === null || isNaN(value)) return "Required";
+    if (field.min !== undefined && value < field.min) return `Must be \u2265 ${field.min}`;
+    if (field.max !== undefined && value > field.max) return `Must be \u2264 ${field.max}`;
+    return null;
+  }
+
+  // All current validation errors for the fields actually in view right now (common fields
+  // + whichever operation is selected) - used to gate generation entirely rather than let a
+  // bad value through to produce a giant or nonsensical program.
+  function getCurrentErrors() {
+    const errors = [];
+    COMMON_FIELDS.forEach((f) => {
+      if (f.isText || f.type === "select") return;
+      const msg = validateFieldValue(f, values.common[f.key]);
+      if (msg) errors.push(`${f.label}: ${msg}`);
+    });
+    OPERATIONS[currentOp].fields.forEach((f) => {
+      if (f.isText || f.type === "select" || f.type === "points" || f.type === "checkbox") return;
+      const msg = validateFieldValue(f, values.op[currentOp][f.key]);
+      if (msg) errors.push(`${f.label}: ${msg}`);
+    });
+    return errors;
+  }
+
+  // Swaps a field's stated mm-based unit label for the inch equivalent when the
+  // program's unit system is set to inch. Purely cosmetic - stored values are
+  // whatever the operator typed, in whichever system they selected.
+  function linearUnitLabel(unit) {
+    if (values.common.units !== "in") return unit;
+    if (unit === "mm/min") return "in/min";
+    if (unit === "mm") return "in";
+    return unit;
+  }
+
+  function renderForm() {
+    const commonEl = document.getElementById("commonFields");
+    commonEl.innerHTML = "";
+    COMMON_FIELDS.forEach(f => {
+      commonEl.appendChild(fieldInput(f, values.common[f.key], (v) => {
+        values.common[f.key] = v;
+        if (f.key === "units") renderForm(); // unit labels across the whole form depend on this
+        else renderOutput();
+      }));
+    });
+
+    document.getElementById("opSectionTitle").textContent = OPERATIONS[currentOp].label + " Parameters";
+    const opEl = document.getElementById("opFields");
+    opEl.innerHTML = "";
+    OPERATIONS[currentOp].fields.forEach(f => {
+      opEl.appendChild(fieldInput(f, values.op[currentOp][f.key], (v) => {
+        values.op[currentOp][f.key] = v; renderOutput();
+      }));
+    });
+  }
+
+  function renderOutput() {
+    const validationErrors = getCurrentErrors();
+    if (validationErrors.length > 0) {
+      const out = document.getElementById("gcodeOutput");
+      out.innerHTML = `<span style="color:var(--red)">FIX ${validationErrors.length} INVALID PARAMETER${validationErrors.length > 1 ? "S" : ""} BEFORE GENERATING:</span>\n\n` +
+        validationErrors.map((e) => `  \u2022 ${escapeHtml(e)}`).join("\n");
+      document.getElementById("lineCount").textContent = "0 lines";
+      document.getElementById("statProgram").textContent = "O" + String(values.common.programNumber || 0).padStart(4, "0");
+      document.getElementById("statOp").textContent = OPERATIONS[currentOp].label.toUpperCase();
+      const led = document.getElementById("statusLed");
+      led.style.background = "var(--red)"; led.style.boxShadow = "0 0 6px var(--red)";
+      document.getElementById("statusText").textContent = "INVALID";
+      window._lastGcode = "";
+      if (window._activeView === "toolpath") drawToolpath();
+      return;
+    }
+
+    const params = { ...values.common, ...values.op[currentOp] };
+    // Fields marked type:"points" are stored as raw textarea text; parse before generating.
+    OPERATIONS[currentOp].fields.forEach((f) => {
+      if (f.type === "points") params[f.key] = parsePoints(params[f.key]);
+    });
+    let lines = [];
+    let statusOk = true;
+    try {
+      lines = OPERATIONS[currentOp].generate(params);
+    } catch (e) {
+      statusOk = false;
+      lines = [`(ERROR GENERATING G-CODE: ${e.message})`];
+    }
+
+    const out = document.getElementById("gcodeOutput");
+    out.innerHTML = lines.map((line, i) => {
+      const isComment = line.trim().startsWith("(") || line.trim().startsWith("%");
+      const numStr = String(i + 1).padStart(3, " ");
+      const cls = isComment ? "comment" : "";
+      return `<span class="ln-num">${numStr}</span><span class="${cls}">${escapeHtml(line)}</span>`;
+    }).join("\n");
+
+    document.getElementById("lineCount").textContent = `${lines.length} lines`;
+    document.getElementById("statProgram").textContent = "O" + String(values.common.programNumber).padStart(4, "0");
+    document.getElementById("statOp").textContent = OPERATIONS[currentOp].label.toUpperCase();
+
+    const led = document.getElementById("statusLed");
+    const statusText = document.getElementById("statusText");
+    if (statusOk) {
+      led.style.background = "var(--green)"; led.style.boxShadow = "0 0 6px var(--green)";
+      statusText.textContent = "READY";
+    } else {
+      led.style.background = "var(--red)"; led.style.boxShadow = "0 0 6px var(--red)";
+      statusText.textContent = "ERROR";
+    }
+    window._lastGcode = lines.join("\n");
+    if (window._activeView === "toolpath") drawToolpath();
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // ---- Toolpath parsing (pure - no DOM) ----
+  // Walks the generated G-code text and turns it into flat 2D (XY-projected) segments.
+  // Handles modal G-codes (a bare "X.. Y.." line inherits the last motion mode - this is
+  // exactly how the bolt-circle and ramp code the engine emits actually behaves on a real
+  // control), G00/G01/G02/G03, G83 canned-cycle chaining, and full-circle vs partial arcs.
+  function parseToolpath(gcodeText) {
+    const segments = [];
+    let curX = 0, curY = 0;
+    let motion = null;
+    let drillActive = false;
+
+    for (const raw of gcodeText.split("\n")) {
+      const line = raw.trim();
+      // Comments and the "%"/"O...." header line are the only lines that mix letters with
+      // numbers in ways that would confuse the token parser below - skip them outright.
+      if (!line || line === "%" || line.includes("(")) continue;
+
+      const tokens = {};
+      const re = /([A-Z])(-?[0-9]*\.?[0-9]+)/g;
+      let m;
+      while ((m = re.exec(line))) tokens[m[1]] = parseFloat(m[2]);
+
+      if (/\bG00\b/.test(line)) motion = "G00";
+      else if (/\bG01\b/.test(line)) motion = "G01";
+      else if (/\bG02\b/.test(line)) motion = "G02";
+      else if (/\bG03\b/.test(line)) motion = "G03";
+      else if (/\bG83\b/.test(line)) { motion = "G83"; drillActive = true; }
+      if (/\bG80\b/.test(line)) { drillActive = false; motion = null; continue; }
+
+      const hasX = "X" in tokens;
+      const hasY = "Y" in tokens;
+      const hasZ = "Z" in tokens;
+
+      if (!hasX && !hasY) {
+        if (motion === "G01" && hasZ) segments.push({ type: "plunge", x: curX, y: curY });
+        continue;
+      }
+
+      const newX = hasX ? tokens.X : curX;
+      const newY = hasY ? tokens.Y : curY;
+
+      if (drillActive) {
+        segments.push({ type: "drill", x: newX, y: newY });
+        curX = newX; curY = newY;
+        continue;
+      }
+
+      if (motion === "G00") {
+        segments.push({ type: "rapid", x0: curX, y0: curY, x1: newX, y1: newY });
+      } else if (motion === "G01") {
+        segments.push({ type: hasZ ? "ramp" : "cut", x0: curX, y0: curY, x1: newX, y1: newY });
+      } else if (motion === "G02" || motion === "G03") {
+        const cx = curX + (tokens.I || 0);
+        const cy = curY + (tokens.J || 0);
+        segments.push({
+          type: hasZ ? "arc-ramp" : "arc-cut",
+          x0: curX, y0: curY, x1: newX, y1: newY, cx, cy, cw: motion === "G02",
+        });
+      }
+      curX = newX; curY = newY;
+    }
+    return segments;
+  }
+
+  // Flattens an arc segment into a polyline of {x,y} points for drawing. Handles both the
+  // full-circle case (start === end, used for every closing pass in this engine) and a
+  // general partial arc, respecting G02 (CW) / G03 (CCW) direction.
+  function arcPoints(seg, segmentsPerFullCircle = 64) {
+    const { x0, y0, x1, y1, cx, cy, cw } = seg;
+    const r = Math.hypot(x0 - cx, y0 - cy);
+    const startAngle = Math.atan2(y0 - cy, x0 - cx);
+    const endAngle = Math.atan2(y1 - cy, x1 - cx);
+    const isFullCircle = Math.hypot(x1 - x0, y1 - y0) < 1e-4;
+    let sweep;
+    if (isFullCircle) {
+      sweep = cw ? -2 * Math.PI : 2 * Math.PI;
+    } else if (cw) {
+      sweep = startAngle - endAngle;
+      if (sweep <= 0) sweep += 2 * Math.PI;
+      sweep = -sweep;
+    } else {
+      sweep = endAngle - startAngle;
+      if (sweep <= 0) sweep += 2 * Math.PI;
+    }
+    const steps = Math.max(2, Math.round((Math.abs(sweep) / (2 * Math.PI)) * segmentsPerFullCircle));
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = startAngle + sweep * (i / steps);
+      pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+    return pts;
+  }
+
+  // Shared by drawToolpath (Generator tab) and drawPartPreview (Simulator pane) - parses
+  // G-code text into segments, fits them to the canvas, and draws rapid/cut/ramp/drill in a
+  // consistent color scheme. Returns the coordinate transform so callers can layer extra
+  // overlays (e.g. a live tool-position marker) on top using the same mapping.
+  function drawSegmentsToCanvas(canvas, gcodeText) {
+    if (!canvas || canvas.clientWidth === 0) return null;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const segments = parseToolpath(gcodeText || "");
+    if (segments.length === 0) return { ctx, w, h, toX: null, toY: null };
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const consider = (x, y) => {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    };
+    segments.forEach((s) => {
+      if (s.type === "drill" || s.type === "plunge") {
+        consider(s.x, s.y);
+      } else if (s.type.startsWith("arc")) {
+        const r = Math.hypot(s.x0 - s.cx, s.y0 - s.cy);
+        consider(s.cx - r, s.cy - r);
+        consider(s.cx + r, s.cy + r);
+      } else {
+        consider(s.x0, s.y0); consider(s.x1, s.y1);
+      }
+    });
+    if (!isFinite(minX)) return { ctx, w, h, toX: null, toY: null };
+
+    const padding = 36;
+    const dataW = Math.max(maxX - minX, 0.001);
+    const dataH = Math.max(maxY - minY, 0.001);
+    const scale = Math.min((w - padding * 2) / dataW, (h - padding * 2) / dataH);
+    const xOff = (w - dataW * scale) / 2 - minX * scale;
+    const yOff = (h - dataH * scale) / 2 - minY * scale;
+    const toX = (x) => xOff + x * scale;
+    const toY = (y) => h - (yOff + y * scale); // flip: +Y in G-code is up on screen
+
+    // origin crosshair
+    ctx.strokeStyle = "rgba(124,140,175,0.35)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    const ox = toX(0), oy = toY(0);
+    ctx.beginPath();
+    ctx.moveTo(ox - 8, oy); ctx.lineTo(ox + 8, oy);
+    ctx.moveTo(ox, oy - 8); ctx.lineTo(ox, oy + 8);
+    ctx.stroke();
+
+    segments.forEach((s) => {
+      if (s.type === "rapid") {
+        ctx.strokeStyle = "#45527A"; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(toX(s.x0), toY(s.y0));
+        ctx.lineTo(toX(s.x1), toY(s.y1));
+        ctx.stroke();
+      } else if (s.type === "cut") {
+        ctx.strokeStyle = "#3D8BFF"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(toX(s.x0), toY(s.y0));
+        ctx.lineTo(toX(s.x1), toY(s.y1));
+        ctx.stroke();
+      } else if (s.type === "ramp") {
+        ctx.strokeStyle = "#2FD480"; ctx.lineWidth = 1.75; ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(toX(s.x0), toY(s.y0));
+        ctx.lineTo(toX(s.x1), toY(s.y1));
+        ctx.stroke();
+      } else if (s.type === "arc-cut" || s.type === "arc-ramp") {
+        ctx.strokeStyle = s.type === "arc-cut" ? "#3D8BFF" : "#2FD480";
+        ctx.lineWidth = s.type === "arc-cut" ? 1.5 : 1.75;
+        ctx.setLineDash([]);
+        const pts = arcPoints(s);
+        ctx.beginPath();
+        pts.forEach((pt, i) => {
+          const cx = toX(pt.x), cy = toY(pt.y);
+          if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+        });
+        ctx.stroke();
+      } else if (s.type === "drill") {
+        ctx.fillStyle = "#FF5B54";
+        ctx.beginPath();
+        ctx.arc(toX(s.x), toY(s.y), 4, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (s.type === "plunge") {
+        ctx.strokeStyle = "#7C8CAF"; ctx.lineWidth = 1.25; ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(toX(s.x), toY(s.y), 3.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+
+    return { ctx, w, h, toX, toY, minX, maxX, minY, maxY };
+  }
+
+  function drawToolpath() {
+    const canvas = document.getElementById("toolpathCanvas");
+    drawSegmentsToCanvas(canvas, window._lastGcode);
+  }
+
+  // Simulator's part preview: same drawing as drawToolpath, but for the program currently
+  // loaded into the simulator's own buffer, plus a live marker for the simulator's actual
+  // tool position - moves as you jog, turn the MPG, or run Cycle Start.
+  function drawPartPreview() {
+    const canvas = document.getElementById("partPreviewCanvas");
+    if (!canvas || canvas.clientWidth === 0) return;
+    const gcodeText = sim.programBuffer.join("\n");
+    const result = drawSegmentsToCanvas(canvas, gcodeText);
+    if (!result) return;
+    const { ctx, w, h, toX, toY, minX, maxX, minY, maxY } = result;
+
+    // No program loaded - still show where the tool sits relative to a small default window
+    // centered on the current position, so the preview isn't just blank before you load one.
+    const hasPath = !!toX;
+    const px = hasPath ? toX(sim.position.X) : w / 2 + sim.position.X * 4;
+    const py = hasPath ? toY(sim.position.Y) : h / 2 - sim.position.Y * 4;
+
+    if (!hasPath) {
+      ctx.fillStyle = "#7B93AD";
+      ctx.font = "11px 'IBM Plex Sans', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("NO PROGRAM LOADED", w / 2, h / 2 - 16);
+    }
+
+    ctx.strokeStyle = "#142438";
+    ctx.fillStyle = "#D9A400";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px - 12, py); ctx.lineTo(px + 12, py);
+    ctx.moveTo(px, py - 12); ctx.lineTo(px, py + 12);
+    ctx.strokeStyle = "rgba(20,36,56,0.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function setActiveView(view) {
+    const gcodeBody = document.getElementById("gcodeOutput");
+    const toolpathBody = document.getElementById("toolpathBody");
+    const tabGcode = document.getElementById("tabGcode");
+    const tabToolpath = document.getElementById("tabToolpath");
+    if (view === "toolpath") {
+      gcodeBody.style.display = "none";
+      toolpathBody.style.display = "flex";
+      tabGcode.classList.remove("active");
+      tabToolpath.classList.add("active");
+      requestAnimationFrame(drawToolpath); // wait a frame so the now-visible canvas has real dimensions
+    } else {
+      gcodeBody.style.display = "block";
+      toolpathBody.style.display = "none";
+      tabToolpath.classList.remove("active");
+      tabGcode.classList.add("active");
+    }
+    window._activeView = view;
+  }
+
+  document.getElementById("tabGcode").onclick = () => setActiveView("gcode");
+  document.getElementById("tabToolpath").onclick = () => setActiveView("toolpath");
+  window._activeView = "gcode";
+  window.addEventListener("resize", () => {
+    if (window._activeView === "toolpath") drawToolpath();
+    drawPartPreview();
+  });
+
+  function renderAll() {
+    renderSoftkeys();
+    renderForm();
+    renderOutput();
+  }
+
+  document.getElementById("btnExport").onclick = async () => {
+    if (!window._lastGcode) { flashStatus("FIX INVALID PARAMETERS FIRST", true); return; }
+    const defaultName = `O${String(values.common.programNumber).padStart(4, "0")}.nc`;
+    const content = window._lastGcode || "";
+
+    // Running inside the Tauri shell: use the native Save As dialog + real filesystem write.
+    if (window.__TAURI__) {
+      try {
+        const path = await window.__TAURI__.dialog.save({
+          defaultPath: defaultName,
+          filters: [{ name: "NC Program", extensions: ["nc", "txt"] }],
+        });
+        if (path) {
+          await window.__TAURI__.fs.writeTextFile(path, content);
+          flashStatus("SAVED");
+        }
+      } catch (e) {
+        flashStatus("SAVE FAILED", true);
+      }
+      return;
+    }
+
+    // Standalone browser fallback (e.g. previewing index.html directly).
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = defaultName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  function flashStatus(text, isError = false) {
+    const statusText = document.getElementById("statusText");
+    const led = document.getElementById("statusLed");
+    const prevText = statusText.textContent;
+    const prevBg = led.style.background;
+    const prevShadow = led.style.boxShadow;
+    statusText.textContent = text;
+    led.style.background = isError ? "var(--red)" : "var(--green)";
+    led.style.boxShadow = isError ? "0 0 6px var(--red)" : "0 0 6px var(--green)";
+    setTimeout(() => {
+      statusText.textContent = prevText;
+      led.style.background = prevBg;
+      led.style.boxShadow = prevShadow;
+    }, 1400);
+  }
+
+  document.getElementById("btnCopy").onclick = async () => {
+    if (!window._lastGcode) { flashStatus("FIX INVALID PARAMETERS FIRST", true); return; }
+    try {
+      await navigator.clipboard.writeText(window._lastGcode || "");
+      const btn = document.getElementById("btnCopy");
+      const original = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => btn.textContent = original, 1200);
+    } catch (e) { /* clipboard may be unavailable in some contexts */ }
+  };
+
+  document.getElementById("btnReset").onclick = () => {
+    initValues();
+    renderAll();
+  };
+
+  // ==================== SIMULATOR ====================
+  // A functional practice replica of the panel: power/E-stop gate everything else, mode
+  // selection gates which controls respond (jog only in JOG, MPG only in HANDLE, typing
+  // only in EDIT/MDI, Cycle Start only in AUTO/MDI) - same interlocks a real control uses,
+  // which is the actual point of "practicing the controls."
+  // Soft travel limits - a small mill's working envelope. Overtravel is checked on every
+  // jog step, MPG pulse, and executed program move.
+  const AXIS_LIMITS = { X: [-300, 300], Y: [-200, 200], Z: [-150, 50] };
+
+  const sim = {
+    power: false,
+    estop: false,
+    servoOn: false, // energizes a moment after power-on, same as a real control's boot sequence
+    needsZeroReturn: true, // every power-up (and every E-stop) requires re-referencing before motion
+    referenced: { X: false, Y: false, Z: false },
+    mode: "EDIT",
+    position: { X: 0, Y: 0, Z: 0 },
+    handleAxis: "X",
+    increment: 1, // 1, 10, 100 -> *0.001mm
+    overridePct: 100,
+    programBuffer: [],
+    cursorLine: -1,
+    running: false,
+    singleBlock: false,
+    spindle: "STOP",
+    coolant: false,
+    currentTool: null, // last tool number actually loaded via T_ M06
+    toolsAvailable: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), // simulated magazine
+    mdiInput: "",
+    alarmMsg: "",
+    runTimer: null,
+  };
+
+  function simAlarm(msg) {
+    sim.alarmMsg = msg;
+    simRender();
+    clearTimeout(sim._alarmTimer);
+    sim._alarmTimer = setTimeout(() => { sim.alarmMsg = ""; simRender(); }, 2200);
+  }
+
+  function simGateOk() {
+    if (!sim.power) { simAlarm("POWER OFF"); return false; }
+    if (sim.estop) { simAlarm("EMERGENCY STOP ENGAGED"); return false; }
+    if (!sim.servoOn) { simAlarm("SERVO NOT READY"); return false; }
+    return true;
+  }
+
+  // Separate from simGateOk() because REF mode itself must stay reachable even while this
+  // is true - you need to be able to switch to REF and perform the zero return in the first
+  // place. Only actual motion (jog/MPG/Cycle Start) is gated on it.
+  function simRequireReferenced() {
+    if (sim.needsZeroReturn) { simAlarm("ZERO RETURN REQUIRED"); return false; }
+    return true;
+  }
+
+  function simCheckOvertravel(axis, value) {
+    const [lo, hi] = AXIS_LIMITS[axis];
+    if (value < lo || value > hi) {
+      simAlarm(`OVERTRAVEL ALARM: ${axis} AXIS ${value < lo ? "-" : "+"} LIMIT`);
+      return false;
+    }
+    return true;
+  }
+
+  function simPowerOn() {
+    if (sim.estop) { simAlarm("RELEASE E-STOP FIRST"); return; }
+    sim.power = true;
+    sim.servoOn = false;
+    simRender();
+    // Brief simulated boot delay before servos energize - matches the real "not ready"
+    // window on power-up. A fresh boot always requires re-referencing the axes.
+    setTimeout(() => {
+      if (sim.power && !sim.estop) {
+        sim.servoOn = true;
+        sim.needsZeroReturn = true;
+        sim.referenced = { X: false, Y: false, Z: false };
+        simRender();
+      }
+    }, 800);
+  }
+  function simPowerOff() {
+    sim.power = false;
+    sim.servoOn = false;
+    simStopCycle();
+    simRender();
+  }
+  function simToggleEstop() {
+    sim.estop = !sim.estop;
+    if (sim.estop) {
+      sim.power = false;
+      sim.servoOn = false;
+      simStopCycle();
+      // Conservative but realistic: treat any E-stop as potentially having lost position
+      // reference, same as the power-up case, rather than trusting the interrupted motion.
+      sim.needsZeroReturn = true;
+      sim.referenced = { X: false, Y: false, Z: false };
+      simAlarm("EMERGENCY STOP ENGAGED");
+    }
+    simRender();
+  }
+  function simSetMode(m) {
+    if (!simGateOk()) return;
+    if (sim.running) { simAlarm("STOP CYCLE FIRST"); return; }
+    sim.mode = m;
+    simRender();
+  }
+  function simSetHandleAxis(a) { if (simGateOk()) { sim.handleAxis = a; simRender(); } }
+  function simSetIncrement(v) { if (simGateOk()) { sim.increment = v; simRender(); } }
+  function simSetOverride(pct) {
+    sim.overridePct = Math.max(0, Math.min(150, Math.round(pct / 10) * 10));
+    simRender();
+  }
+  function simZeroReturnAxis(axis) {
+    sim.position[axis] = 0;
+    sim.referenced[axis] = true;
+    if (sim.referenced.X && sim.referenced.Y && sim.referenced.Z) sim.needsZeroReturn = false;
+    simRender();
+  }
+  function simJog(axis, dir) {
+    if (!simGateOk()) return;
+    if (sim.mode === "REF") { simZeroReturnAxis(axis); return; }
+    if (sim.mode !== "JOG") { simAlarm("SWITCH TO JOG MODE"); return; }
+    if (!simRequireReferenced()) return;
+    const step = 1 * (sim.overridePct / 100);
+    const proposed = sim.position[axis] + dir * step;
+    if (!simCheckOvertravel(axis, proposed)) return;
+    sim.position[axis] = proposed;
+    simRender();
+  }
+  function simMpgMove(dir, silent) {
+    if (!sim.power || sim.estop || !sim.servoOn || sim.mode !== "HANDLE") {
+      // Dragging the dial fires this many times per second, so it stays silent - an alarm
+      // every 15 degrees of rotation would be unusable. An explicit button click is a single,
+      // deliberate action though, so it should tell you why nothing happened.
+      if (!silent) {
+        simAlarm(!sim.power ? "POWER OFF" : sim.estop ? "EMERGENCY STOP ENGAGED" : !sim.servoOn ? "SERVO NOT READY" : "SWITCH TO HANDLE MODE");
+      }
+      return;
+    }
+    if (sim.needsZeroReturn) { if (!silent) simAlarm("ZERO RETURN REQUIRED"); return; }
+    const stepTable = { 1: 0.001, 10: 0.01, 100: 0.1 };
+    const proposed = sim.position[sim.handleAxis] + dir * stepTable[sim.increment];
+    if (!simCheckOvertravel(sim.handleAxis, proposed)) return;
+    sim.position[sim.handleAxis] = proposed;
+    simRender();
+  }
+  function simTypeChar(c) {
+    if (!simGateOk()) return;
+    if (sim.mode !== "EDIT" && sim.mode !== "MDI") { simAlarm("SWITCH TO EDIT OR MDI MODE"); return; }
+    sim.mdiInput += c.toUpperCase();
+    simRender();
+  }
+  function simBackspace() {
+    if (!simGateOk()) return;
+    sim.mdiInput = sim.mdiInput.slice(0, -1);
+    simRender();
+  }
+  function simEob() { simTypeChar(";"); }
+  function simInsertLine() {
+    if (!simGateOk()) return;
+    if (sim.mode !== "EDIT" && sim.mode !== "MDI") { simAlarm("SWITCH TO EDIT OR MDI MODE"); return; }
+    if (!sim.mdiInput.trim()) return;
+    sim.programBuffer.push(sim.mdiInput.trim());
+    sim.mdiInput = "";
+    simRender();
+  }
+  function simDeleteLine() {
+    if (!simGateOk()) return;
+    sim.programBuffer.pop();
+    simRender();
+  }
+  function simClearProgram() {
+    if (!simGateOk()) return;
+    sim.programBuffer = [];
+    sim.cursorLine = -1;
+    simRender();
+  }
+  function simLoadGenerated() {
+    if (!simGateOk()) return;
+    const text = window._lastGcode || "";
+    if (!text.trim()) { simAlarm("NO PROGRAM IN GENERATOR"); return; }
+    sim.programBuffer = text.split("\n").filter((l) => l.trim().length > 0);
+    sim.cursorLine = -1;
+    simRender();
+  }
+  const CYCLE_BASE_STEP_MS = 450; // step pacing at 100% feed override
+
+  function simStopCycle() {
+    clearTimeout(sim.runTimer);
+    sim.runTimer = null;
+    sim.running = false;
+  }
+  function simCycleStart() {
+    if (!simGateOk()) return;
+    if (!simRequireReferenced()) return;
+    if (sim.mode !== "AUTO" && sim.mode !== "MDI") { simAlarm("SWITCH TO AUTO OR MDI MODE"); return; }
+    if (sim.programBuffer.length === 0) { simAlarm("NO PROGRAM LOADED"); return; }
+    if (sim.running) return;
+    if (sim.cursorLine < 0 || sim.cursorLine >= sim.programBuffer.length) sim.cursorLine = 0;
+    sim.running = true;
+    simRender();
+    simScheduleNextStep();
+  }
+  // Self-rescheduling instead of a fixed setInterval so the override dial's effect is live -
+  // every step re-reads sim.overridePct right before scheduling the next one, so turning the
+  // dial mid-cycle changes the pace immediately instead of only affecting jog. 0% override
+  // holds motion entirely (same as a real machine) rather than stopping the cycle outright -
+  // it keeps checking every 200ms so bringing the dial back up resumes automatically, with no
+  // need to press Cycle Start again.
+  function simScheduleNextStep() {
+    if (!sim.running) return;
+    if (sim.overridePct <= 0) {
+      sim.runTimer = setTimeout(simScheduleNextStep, 200);
+      return;
+    }
+    const delay = CYCLE_BASE_STEP_MS / (sim.overridePct / 100);
+    sim.runTimer = setTimeout(() => { simStepLine(); simScheduleNextStep(); }, delay);
+  }
+  function simFeedHold() {
+    if (!sim.running) return;
+    simStopCycle();
+    simRender();
+  }
+  function simStepLine() {
+    if (sim.cursorLine >= sim.programBuffer.length) { simStopCycle(); sim.cursorLine = -1; simRender(); return; }
+    const line = sim.programBuffer[sim.cursorLine];
+    // G91/G28 (relative-mode reference return) has no straightforward absolute position we
+    // can simulate - "Z0" there means "move 0 relative units", not "go to Z=0" - so skip it
+    // entirely rather than risk a wrong position. Everything else gets its comment stripped
+    // (not skipped outright) before parsing, so a typed line with a trailing "(...)" note
+    // still updates position correctly instead of silently doing nothing.
+    const isReferenceMove = /\bG28\b/.test(line) || /\bG91\b/.test(line);
+    const codeOnly = line.replace(/\([^)]*\)/g, "");
+
+    // Spindle state tracking - keeps the MCP's spindle indicator and the alarm check below
+    // in sync with what the program actually commands, same as a real control.
+    if (/\bM0?3\b/.test(codeOnly)) sim.spindle = "CW";
+    else if (/\bM0?4\b/.test(codeOnly)) sim.spindle = "CCW";
+    else if (/\bM0?5\b/.test(codeOnly)) sim.spindle = "STOP";
+
+    // Tool change: alarm if the requested tool isn't in the simulated magazine.
+    const toolChangeMatch = codeOnly.match(/T(\d+)\s*M0?6\b/);
+    if (toolChangeMatch) {
+      const t = parseInt(toolChangeMatch[1], 10);
+      if (!sim.toolsAvailable.has(t)) {
+        simAlarm(`TOOL NOT FOUND: T${t}`);
+        simStopCycle();
+        simRender();
+        return;
+      }
+      sim.currentTool = t;
+    }
+
+    // Tool offset mismatch: G43 H_ referencing a different tool's length offset than the
+    // one actually loaded is a genuinely common, genuinely dangerous programming error - the
+    // machine would cut at the wrong tool's length reference.
+    const g43Match = codeOnly.match(/G43\s+H(\d+)/);
+    if (g43Match) {
+      const h = parseInt(g43Match[1], 10);
+      if (sim.currentTool !== null && h !== sim.currentTool) {
+        simAlarm(`TOOL OFFSET MISMATCH: H${h} \u2260 T${sim.currentTool}`);
+        simStopCycle();
+        simRender();
+        return;
+      }
+    }
+
+    // Spindle alarm: a cutting move (G01/G02/G03) with the spindle stopped - the classic
+    // "programmed S3000 but forgot M03" mistake.
+    const isCuttingMove = /\bG0?[1-3]\b/.test(codeOnly);
+    if (isCuttingMove && sim.spindle === "STOP") {
+      simAlarm("SPINDLE NOT RUNNING (S-CODE WITHOUT M3/M4)");
+      simStopCycle();
+      simRender();
+      return;
+    }
+
+    if (line.trim() !== "%" && !isReferenceMove) {
+      const re = /([XYZ])(-?[0-9]*\.?[0-9]+)/g;
+      let m;
+      const proposed = {};
+      while ((m = re.exec(codeOnly))) proposed[m[1]] = parseFloat(m[2]);
+      for (const axis in proposed) {
+        if (!simCheckOvertravel(axis, proposed[axis])) {
+          simStopCycle();
+          simRender();
+          return;
+        }
+      }
+      Object.assign(sim.position, proposed);
+    }
+    sim.cursorLine++;
+    if (sim.singleBlock) { simStopCycle(); }
+    simRender();
+    if (sim.cursorLine >= sim.programBuffer.length) { simStopCycle(); simAlarm("PROGRAM END"); }
+  }
+  function simResetAlarm() {
+    sim.alarmMsg = "";
+    simRender();
+  }
+  function simToggleSpindle(dir) {
+    if (!simGateOk()) return;
+    sim.spindle = sim.spindle === dir ? "STOP" : dir;
+    simRender();
+  }
+  function simToggleCoolant() {
+    if (!simGateOk()) return;
+    sim.coolant = !sim.coolant;
+    simRender();
+  }
+  function simToggleSingleBlock() {
+    if (!simGateOk()) return;
+    sim.singleBlock = !sim.singleBlock;
+    simRender();
+  }
+  function simCursorNav(delta) {
+    if (!simGateOk()) return;
+    if (sim.running) return; // don't fight the auto-run highlight
+    if (sim.programBuffer.length === 0) return;
+    const base = sim.cursorLine < 0 ? 0 : sim.cursorLine;
+    sim.cursorLine = Math.max(0, Math.min(sim.programBuffer.length - 1, base + delta));
+    simRender();
+  }
+
+  // ---- keyboard + MCP construction ----
+  let simKeyMap = {}; // lookup used by physical-keyboard passthrough: "Q" / "-" / "ACTION:backspace" -> button element
+
+  function buildSimKeyboard() {
+    const rows = [
+      ["1","2","3","4","5","6","7","8","9","0","-",{ label: "CAN", action: "backspace" }],
+      ["Q","W","E","R","T","Y","U","I","O","P"],
+      ["A","S","D","F","G","H","J","K","L",{ label: "EOB", action: "eob" }],
+      ["Z","X","C","V","B","N","M",",",".",{ label: "INSERT", action: "insert" }],
+      ["(", ")", { label: "SPACE", action: "space", wide: true }, { label: "DELETE LINE", action: "deleteline" }],
+    ];
+    const el = document.getElementById("mdiKeyboard");
+    el.innerHTML = "";
+    simKeyMap = {};
+    rows.forEach((row) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "kb-row";
+      row.forEach((k) => {
+        const isObj = typeof k === "object";
+        const btn = document.createElement("button");
+        btn.className = "kb-key" + (isObj ? " accent-key" : "") + (isObj && k.wide ? " wide" : "");
+        btn.textContent = isObj ? k.label : k;
+        btn.onclick = () => {
+          if (!isObj) { simTypeChar(k); return; }
+          if (k.action === "backspace") simBackspace();
+          else if (k.action === "eob") simEob();
+          else if (k.action === "insert") simInsertLine();
+          else if (k.action === "space") simTypeChar(" ");
+          else if (k.action === "deleteline") simDeleteLine();
+        };
+        simKeyMap[isObj ? "ACTION:" + k.action : k] = btn;
+        rowEl.appendChild(btn);
+      });
+      el.appendChild(rowEl);
+    });
+  }
+
+  // Real keyboard passthrough - lets you type MDI lines with your actual keyboard instead
+  // of clicking each on-screen key, which is how anyone would actually want to practice.
+  // Routes through the same on-screen button (btn.click()) rather than duplicating the
+  // action logic, so there's one source of truth for what each key does.
+  const SIM_SPECIAL_KEY_MAP = {
+    Backspace: "ACTION:backspace",
+    Enter: "ACTION:insert",
+    " ": "ACTION:space",
+    ";": "ACTION:eob",
+    Delete: "ACTION:deleteline",
+  };
+  function handleSimPhysicalKey(e) {
+    const activeTag = document.activeElement && document.activeElement.tagName;
+    if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT") return;
+
+    if (e.key === "Escape") { e.preventDefault(); simResetAlarm(); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); simCursorNav(-1); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); simCursorNav(1); return; }
+
+    let id = null;
+    if (e.key in SIM_SPECIAL_KEY_MAP) id = SIM_SPECIAL_KEY_MAP[e.key];
+    else if (e.key.length === 1 && /[a-zA-Z0-9\-.,()]/.test(e.key)) id = e.key.toUpperCase();
+    if (!id) return;
+
+    const btn = simKeyMap[id];
+    if (!btn) return;
+    e.preventDefault();
+    btn.classList.add("pressed");
+    setTimeout(() => btn.classList.remove("pressed"), 120);
+    btn.click();
+  }
+  window.addEventListener("keydown", handleSimPhysicalKey);
+
+  function buildSimMcp() {
+    const el = document.getElementById("mcp");
+    el.innerHTML = "";
+
+    function group(label, buttons) {
+      const g = document.createElement("div");
+      g.className = "mcp-group";
+      const l = document.createElement("div");
+      l.className = "mcp-group-label";
+      l.textContent = label;
+      g.appendChild(l);
+      const row = document.createElement("div");
+      row.className = "mcp-row";
+      buttons.forEach((b) => row.appendChild(b));
+      g.appendChild(row);
+      el.appendChild(g);
+    }
+
+    const modeBtns = ["EDIT", "MDI", "AUTO", "JOG", "HANDLE", "REF"].map((m) => {
+      const b = document.createElement("button");
+      b.className = "mcp-btn toggle";
+      b.dataset.mode = m;
+      b.textContent = m;
+      b.onclick = () => simSetMode(m);
+      return b;
+    });
+    group("Mode", modeBtns);
+
+    const jogBtns = [["X", -1, "X-"], ["X", 1, "X+"], ["Y", -1, "Y-"], ["Y", 1, "Y+"], ["Z", -1, "Z-"], ["Z", 1, "Z+"]].map(([axis, dir, label]) => {
+      const b = document.createElement("button");
+      b.className = "mcp-btn";
+      b.textContent = label;
+      b.onclick = () => simJog(axis, dir);
+      return b;
+    });
+    group("Jog (JOG) / Zero Return (REF)", jogBtns);
+
+    const axisBtns = ["X", "Y", "Z"].map((a) => {
+      const b = document.createElement("button");
+      b.className = "mcp-btn toggle";
+      b.dataset.handleAxis = a;
+      b.textContent = a;
+      b.onclick = () => simSetHandleAxis(a);
+      return b;
+    });
+    group("Handle Axis", axisBtns);
+
+    const incBtns = [1, 10, 100].map((v) => {
+      const b = document.createElement("button");
+      b.className = "mcp-btn toggle";
+      b.dataset.inc = v;
+      b.textContent = "x" + v;
+      b.onclick = () => simSetIncrement(v);
+      return b;
+    });
+    group("Increment", incBtns);
+
+    const cycleStart = document.createElement("button");
+    cycleStart.className = "mcp-btn cycle-start";
+    cycleStart.textContent = "CYCLE START";
+    cycleStart.onclick = simCycleStart;
+    const feedHold = document.createElement("button");
+    feedHold.className = "mcp-btn feed-hold";
+    feedHold.textContent = "FEED HOLD";
+    feedHold.onclick = simFeedHold;
+    const singleBlock = document.createElement("button");
+    singleBlock.className = "mcp-btn toggle";
+    singleBlock.textContent = "SINGLE BLOCK";
+    singleBlock.onclick = simToggleSingleBlock;
+    group("Program", [cycleStart, feedHold, singleBlock]);
+
+    const spindleCw = document.createElement("button");
+    spindleCw.className = "mcp-btn toggle";
+    spindleCw.textContent = "SPINDLE CW";
+    spindleCw.onclick = () => simToggleSpindle("CW");
+    const spindleCcw = document.createElement("button");
+    spindleCcw.className = "mcp-btn toggle";
+    spindleCcw.textContent = "SPINDLE CCW";
+    spindleCcw.onclick = () => simToggleSpindle("CCW");
+    const coolant = document.createElement("button");
+    coolant.className = "mcp-btn toggle";
+    coolant.textContent = "COOLANT";
+    coolant.onclick = simToggleCoolant;
+    group("Spindle / Coolant", [spindleCw, spindleCcw, coolant]);
+  }
+
+  // ---- dials ----
+  function setupOverrideDial() {
+    const dialEl = document.getElementById("overrideDial");
+    const needleEl = document.getElementById("overrideNeedle");
+    const startAngle = -135, endAngle = 135, min = 0, max = 150;
+    function angleForValue(v) { return startAngle + ((v - min) / (max - min)) * (endAngle - startAngle); }
+    function updateNeedle() { needleEl.style.transform = `rotate(${angleForValue(sim.overridePct)}deg)`; }
+    function valueFromEvent(e) {
+      const rect = dialEl.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      let angle = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI + 90;
+      if (angle > 180) angle -= 360;
+      angle = Math.max(startAngle, Math.min(endAngle, angle));
+      return min + ((angle - startAngle) / (endAngle - startAngle)) * (max - min);
+    }
+    let dragging = false;
+    dialEl.addEventListener("mousedown", (e) => { dragging = true; simSetOverride(valueFromEvent(e)); updateNeedle(); e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => { if (dragging) { simSetOverride(valueFromEvent(e)); updateNeedle(); } });
+    window.addEventListener("mouseup", () => dragging = false);
+    updateNeedle();
+    window._updateOverrideNeedle = updateNeedle;
+  }
+
+  function setupMpgDial() {
+    const dialEl = document.getElementById("mpgDial");
+    const needleEl = document.getElementById("mpgNeedle");
+    let dragging = false, lastAngle = 0, accum = 0, rotation = 0;
+    function angleFromEvent(e) {
+      const rect = dialEl.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      return Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI;
+    }
+    dialEl.addEventListener("mousedown", (e) => { dragging = true; lastAngle = angleFromEvent(e); e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const a = angleFromEvent(e);
+      let delta = a - lastAngle;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      lastAngle = a;
+      rotation += delta;
+      needleEl.style.transform = `rotate(${rotation}deg)`;
+      accum += delta;
+      const pulseDeg = 15;
+      while (Math.abs(accum) >= pulseDeg) {
+        const dir = accum > 0 ? 1 : -1;
+        simMpgMove(dir, true); // silent: dragging fires many times per second
+        accum -= dir * pulseDeg;
+      }
+    });
+    window.addEventListener("mouseup", () => dragging = false);
+  }
+
+  // ---- render ----
+  function simRender() {
+    document.getElementById("pwrOn").classList.toggle("engaged", sim.power);
+    document.getElementById("estopBtn").classList.toggle("engaged", sim.estop);
+
+    document.getElementById("scrMode").textContent =
+      !sim.power ? "POWER OFF" :
+      sim.estop ? "E-STOP" :
+      !sim.servoOn ? "NOT READY" :
+      sim.needsZeroReturn ? "REF REQUIRED" :
+      sim.mode;
+    document.getElementById("scrProgram").textContent = "O" + String(values.common?.programNumber || 0).padStart(4, "0");
+    document.getElementById("scrAlarmLed").classList.toggle("on", sim.estop || !!sim.alarmMsg);
+
+    document.getElementById("posX").textContent = sim.position.X.toFixed(3);
+    document.getElementById("posY").textContent = sim.position.Y.toFixed(3);
+    document.getElementById("posZ").textContent = sim.position.Z.toFixed(3);
+    document.getElementById("posModeLabel").textContent = sim.mode;
+    document.getElementById("posAxisLabel").textContent = sim.handleAxis;
+    document.getElementById("posIncLabel").textContent = "x" + sim.increment;
+    document.getElementById("posOvrLabel").textContent = sim.overridePct + "%";
+    document.getElementById("posSpindleLabel").textContent = sim.spindle + (sim.coolant ? " / COOLANT" : "");
+    document.getElementById("posRefLabel").textContent =
+      (["X", "Y", "Z"].map((a) => a + (sim.referenced[a] ? "\u2713" : "\u2717")).join(" "));
+    document.getElementById("posToolLabel").textContent = sim.currentTool === null ? "NONE" : "T" + sim.currentTool;
+    document.getElementById("overrideValue").textContent = sim.overridePct + "%";
+    if (window._updateOverrideNeedle) window._updateOverrideNeedle();
+
+    const listing = document.getElementById("programListing");
+    if (sim.alarmMsg) {
+      listing.innerHTML = `<span style="color:var(--red)">ALARM: ${escapeHtml(sim.alarmMsg)}</span>`;
+    } else if (sim.programBuffer.length === 0) {
+      listing.textContent = "NO PROGRAM";
+    } else {
+      listing.innerHTML = sim.programBuffer.map((l, i) =>
+        `<div class="${i === sim.cursorLine ? "current-line" : ""}">${String(i + 1).padStart(3, "0")} ${escapeHtml(l)}</div>`
+      ).join("");
+      const currentEl = listing.querySelector(".current-line");
+      if (currentEl) currentEl.scrollIntoView({ block: "nearest" });
+    }
+
+    document.getElementById("mdiLine").innerHTML = "&gt;" + escapeHtml(sim.mdiInput) + '<span id="mdiCursor">_</span>';
+
+    document.querySelectorAll("#mcp [data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === sim.mode));
+    document.querySelectorAll("#mcp [data-handle-axis]").forEach((b) => b.classList.toggle("active", b.dataset.handleAxis === sim.handleAxis));
+    document.querySelectorAll("#mcp [data-inc]").forEach((b) => b.classList.toggle("active", Number(b.dataset.inc) === sim.increment));
+
+    const mcpButtons = document.querySelectorAll("#mcp .mcp-btn");
+    mcpButtons.forEach((b) => {
+      if (b.textContent === "SPINDLE CW") b.classList.toggle("active", sim.spindle === "CW");
+      if (b.textContent === "SPINDLE CCW") b.classList.toggle("active", sim.spindle === "CCW");
+      if (b.textContent === "COOLANT") b.classList.toggle("active", sim.coolant);
+      if (b.textContent === "SINGLE BLOCK") b.classList.toggle("active", sim.singleBlock);
+      if (b.textContent === "CYCLE START") b.disabled = sim.running || !sim.power || sim.estop;
+      if (b.textContent === "FEED HOLD") b.disabled = !sim.running;
+    });
+
+    drawPartPreview();
+  }
+
+  function initSimulator() {
+    buildSimKeyboard();
+    buildSimMcp();
+    setupOverrideDial();
+    setupMpgDial();
+
+    document.getElementById("pwrOn").onclick = simPowerOn;
+    document.getElementById("pwrOff").onclick = simPowerOff;
+    document.getElementById("estopBtn").onclick = simToggleEstop;
+    document.getElementById("mpgMinus").onclick = () => simMpgMove(-1);
+    document.getElementById("mpgPlus").onclick = () => simMpgMove(1);
+
+    document.getElementById("simSoftkeys").querySelectorAll("[data-action]").forEach((btn) => {
+      btn.onclick = () => {
+        if (btn.dataset.action === "loadGenerated") simLoadGenerated();
+        else if (btn.dataset.action === "clearProgram") simClearProgram();
+        else if (btn.dataset.action === "resetAlarm") simResetAlarm();
+        else if (btn.dataset.action === "deleteLine") simDeleteLine();
+      };
+    });
+
+    simRender();
+  }
+
+  // ---- split-screen resize ----
+  (function setupSplitResize() {
+    const divider = document.getElementById("splitDivider");
+    const container = document.getElementById("splitContainer");
+    const paneG = document.getElementById("paneGenerator");
+    let dragging = false;
+    divider.addEventListener("mousedown", (e) => { dragging = true; e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const rect = container.getBoundingClientRect();
+      const minH = 160;
+      const newHeight = Math.max(minH, Math.min(rect.height - minH, e.clientY - rect.top));
+      paneG.style.flex = "none";
+      paneG.style.height = newHeight + "px";
+      if (window._activeView === "toolpath") drawToolpath();
+      drawPartPreview();
+    });
+    window.addEventListener("mouseup", () => dragging = false);
+  })();
+
+  initSimulator();
+  renderAll();
+</script>
+</body>
+</html>
